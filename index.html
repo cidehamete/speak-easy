@@ -430,6 +430,26 @@ var currentNoteId = null;   // null = unsaved new note
 var draftTimer    = null;
 
 // ═══════════════════════════════════════════════════════
+//  Punctuation substitution
+// ═══════════════════════════════════════════════════════
+function applyPunctuation(text) {
+  return text
+    .replace(/\bnew paragraph\b/gi, '\n\n')
+    .replace(/\bnew line\b/gi, '\n')
+    .replace(/\b(full stop|period)\b/gi, '.')
+    .replace(/\bcomma\b/gi, ',')
+    .replace(/\bquestion mark\b/gi, '?')
+    .replace(/\b(exclamation point|exclamation mark)\b/gi, '!')
+    .replace(/\bsemicolon\b/gi, ';')
+    .replace(/\bcolon\b/gi, ':')
+    .replace(/\b(em dash|dash)\b/gi, '\u2014')
+    .replace(/\bellipsis\b/gi, '\u2026')
+    // Remove space before punctuation marks
+    .replace(/ ([.,!?;:\u2014\u2026])/g, '$1')
+    .trim();
+}
+
+// ═══════════════════════════════════════════════════════
 //  Speech Recognition
 // ═══════════════════════════════════════════════════════
 function buildRecognition() {
@@ -450,8 +470,17 @@ function buildRecognition() {
       else { interimText += t; }
     }
     if (finalChunk) {
+      finalChunk = applyPunctuation(finalChunk);
       var ta = document.getElementById('transcription');
-      if (ta.value && !/\s$/.test(ta.value)) ta.value += ' ';
+      var existing = ta.value;
+      // Capitalize after sentence-ending punctuation or at the start
+      if (!existing || /[.!?]\s*$/.test(existing)) {
+        finalChunk = finalChunk.charAt(0).toUpperCase() + finalChunk.slice(1);
+      }
+      // Only add a space if the chunk doesn't start with punctuation
+      if (existing && !/\s$/.test(existing) && !/^[.,!?;:\u2014\u2026\n]/.test(finalChunk)) {
+        ta.value += ' ';
+      }
       ta.value += finalChunk;
       scheduleDraft();
     }
