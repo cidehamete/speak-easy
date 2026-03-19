@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Speak Easy — Voice Transcription</title>
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Design tokens ── */
+    :root {
+      --ink:    #111111;
+      --bg:     #ffffff;
+      --border: #444444;
+      --panel:  #f5f5f0;
+      --blue:   #1a4a8a;
+      --red:    #8a1a1a;
+      --green:  #1a5c1a;
+      --amber:  #7a4a00;
+      --hover:  #e8e8e0;
+      --radius: 6px;
+      /* font scale — JS overrides these via .fs-large / .fs-xlarge on <html> */
+      --f-base:  18px;
+      --f-ui:    18px;
+      --f-ta:    22px;
+      --f-notes: 17px;
+      --f-small: 14px;
+    }
+    html.fs-large  {
+      --f-base: 22px; --f-ui: 22px; --f-ta: 26px; --f-notes: 20px; --f-small: 17px;
+    }
+    html.fs-xlarge {
+      --f-base: 28px; --f-ui: 28px; --f-ta: 32px; --f-notes: 24px; --f-small: 20px;
+    }
+
+    /* ── Base ── */
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Georgia, "Times New Roman", Times, serif;
+      font-size: var(--f-base);
+      line-height: 1.5;
+    }
+
+    /* ── App shell ── */
+    #app { display: flex; flex-direction: column; height: 100%; }
+
+    /* ── Header ── */
+    header {
+      background: var(--blue);
+      color: #ffffff;
+      padding: 12px 20px;
+      display: flex;
+      align-items: baseline;
+      gap: 14px;
+      flex-shrink: 0;
+      flex-wrap: wrap;
+    }
+    header h1 { font-size: 26px; font-weight: bold; letter-spacing: 0.02em; white-space: nowrap; }
+    #tagline   { font-size: 16px; font-style: italic; opacity: 0.88; white-space: nowrap; }
+    #chrome-notice {
+      margin-left: auto;
+      background: #d4a017;
+      color: #111;
+      font-size: 14px;
+      font-weight: bold;
+      padding: 4px 12px;
+      border-radius: var(--radius);
+      white-space: nowrap;
+    }
+
+    /* ── Windows help banner ── */
+    #win-help {
+      background: #fffbe6;
+      border-bottom: 3px solid #d4a017;
+      padding: 16px 20px;
+      flex-shrink: 0;
+    }
+    #win-help h2 { font-size: 18px; font-weight: bold; margin-bottom: 8px; color: var(--amber); }
+    #win-help ol { margin: 0 0 12px 22px; }
+    #win-help li { font-size: 16px; margin-bottom: 6px; }
+    #win-help strong { color: #111; }
+    #win-help-close {
+      font-size: 15px;
+      font-family: Georgia, "Times New Roman", Times, serif;
+      font-weight: bold;
+      padding: 8px 18px;
+      border: 2px solid var(--amber);
+      border-radius: var(--radius);
+      background: #fff3cc;
+      color: var(--amber);
+      cursor: pointer;
+    }
+    #win-help-close:hover { background: #ffe899; }
+    #win-help-close:focus { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+    /* ── Main split ── */
+    #main { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Editor panel ── */
+    #editor-panel {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      padding: 18px 20px;
+      gap: 14px;
+      overflow-y: auto;
+    }
+
+    /* ── Mic section ── */
+    #mic-section { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+
+    #mic-btn {
+      width: 130px;
+      height: 130px;
+      border-radius: 50%;
+      border: 4px solid var(--blue);
+      background: #e8f0fa;
+      color: var(--blue);
+      font-size: 16px;
+      font-family: Georgia, "Times New Roman", Times, serif;
+      font-weight: bold;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      line-height: 1.2;
+      text-align: center;
+      padding: 10px;
+    }
+    #mic-btn:hover  { background: #d0e2f7; }
+    #mic-btn:focus  { outline: 4px solid var(--blue); outline-offset: 3px; }
+    #mic-btn.recording { background: #fae8e8; border-color: var(--red); color: var(--red); }
+
+    #mic-icon  { font-size: 38px; line-height: 1; display: block; }
+    #mic-label { font-size: 14px; }
+
+    #status-msg {
+      font-size: 17px;
+      font-weight: bold;
+      min-height: 24px;
+      color: #333;
+      text-align: center;
+      max-width: 480px;
+    }
+    #status-msg.err     { color: var(--red); }
+    #status-msg.live    { color: var(--green); }
+
+    /* ── Editing indicator ── */
+    #editing-indicator {
+      font-size: var(--f-small);
+      font-style: italic;
+      color: #555;
+      padding: 4px 0;
+      border-bottom: 1px solid #ccc;
+    }
+
+    /* ── Labels & inputs ── */
+    label {
+      font-size: var(--f-ui);
+      font-weight: bold;
+      display: block;
+      margin-bottom: 6px;
+    }
+    .section-gap { display: flex; flex-direction: column; gap: 6px; }
+
+    input[type="text"] {
+      width: 100%;
+      font-size: var(--f-ui);
+      font-family: Georgia, "Times New Roman", Times, serif;
+      padding: 10px 12px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--ink);
+      background: var(--bg);
+    }
+    input[type="text"]:focus { outline: 3px solid var(--blue); outline-offset: 1px; }
+
+    textarea {
+      width: 100%;
+      font-size: var(--f-ta);
+      font-family: Georgia, "Times New Roman", Times, serif;
+      line-height: 1.6;
+      padding: 14px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--ink);
+      background: var(--bg);
+      resize: vertical;
+      min-height: 260px;
+      flex: 1;
+    }
+    textarea:focus { outline: 3px solid var(--blue); outline-offset: 1px; }
+
+    /* ── Buttons ── */
+    button {
+      font-size: var(--f-ui);
+      font-family: Georgia, "Times New Roman", Times, serif;
+      font-weight: bold;
+      padding: 12px 22px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      cursor: pointer;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.3;
+    }
+    button:hover { background: var(--hover); }
+    button:focus { outline: 3px solid var(--blue); outline-offset: 2px; }
+
+    .btn-save  { background: #e6f2e6; border-color: var(--green); color: var(--green); }
+    .btn-save:hover  { background: #cce8cc; }
+    .btn-new   { background: #eaf0fa; border-color: var(--blue);  color: var(--blue);  }
+    .btn-new:hover   { background: #d0e2f7; }
+    .btn-del   { background: #f7ebe8; border-color: var(--red);   color: var(--red);
+                 font-size: 14px; padding: 5px 12px; }
+    .btn-del:hover   { background: #f0d5d0; }
+    .btn-full  { width: 100%; text-align: center; }
+
+    .btn-row   { display: flex; flex-wrap: wrap; gap: 10px; }
+
+    /* ── Font size controls ── */
+    #font-controls {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    #font-controls span { font-size: 16px; font-weight: bold; }
+    .fs-btn {
+      font-size: 14px;
+      padding: 6px 14px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .fs-btn.active { background: var(--blue); color: #fff; border-color: var(--blue); }
+
+    /* ── Feedback line ── */
+    #action-feedback {
+      font-size: 17px;
+      color: var(--green);
+      font-weight: bold;
+      min-height: 24px;
+    }
+
+    /* ── Archive panel ── */
+    #archive-panel {
+      width: 330px;
+      flex-shrink: 0;
+      border-left: 2px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    #archive-header {
+      padding: 14px 14px 10px;
+      border-bottom: 2px solid var(--border);
+      flex-shrink: 0;
+    }
+    #archive-header h2 { font-size: 20px; font-weight: bold; margin-bottom: 10px; }
+
+    #search-box {
+      width: 100%;
+      font-size: var(--f-notes);
+      font-family: Georgia, "Times New Roman", Times, serif;
+      padding: 8px 10px;
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--ink);
+    }
+    #search-box:focus { outline: 3px solid var(--blue); outline-offset: 1px; }
+
+    #notes-list { flex: 1; overflow-y: auto; padding: 8px; }
+
+    .note-item {
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: var(--radius);
+      padding: 10px 12px;
+      margin-bottom: 8px;
+    }
+    .note-item-top {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      cursor: pointer;
+    }
+    .note-item-top:focus { outline: 3px solid var(--blue); outline-offset: 2px; }
+    .note-item:hover .note-item-top,
+    .note-item-top:hover  { background: var(--hover); }
+    .note-item.active-note { border-color: var(--blue); background: #e0eaf5; }
+
+    .note-text-block { flex: 1; min-width: 0; }
+    .note-title   { font-size: var(--f-notes); font-weight: bold;
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .note-preview { font-size: var(--f-small); color: #333;
+                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+    .note-date    { font-size: var(--f-small); color: #555; margin-top: 3px; }
+
+    #archive-footer { padding: 12px; border-top: 2px solid var(--border); flex-shrink: 0; }
+
+    /* ── Print styles ── */
+    @media print {
+      header, #win-help, #archive-panel, #mic-section, #editing-indicator,
+      #font-controls, .btn-row, #action-feedback, #note-title { display: none !important; }
+      #editor-panel { padding: 0; gap: 8px; }
+      textarea { border: none; min-height: unset; font-size: 14pt; }
+      #print-title { display: block !important; font-size: 18pt; font-weight: bold; margin-bottom: 8px; }
+    }
+    #print-title { display: none; }
+
+    /* ── Narrow screens ── */
+    @media (max-width: 700px) {
+      #main { flex-direction: column; }
+      #archive-panel { width: 100%; border-left: none; border-top: 2px solid var(--border); max-height: 40vh; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <header>
+    <h1>Speak Easy</h1>
+    <span id="tagline">Your thoughts, saved — no typing required.</span>
+    <span id="chrome-notice">Best used in Google Chrome</span>
+  </header>
+
+  <!-- Windows 11 first-run help banner -->
+  <div id="win-help" role="region" aria-label="Microphone setup instructions">
+    <h2>First-Time Setup: Allow Your Microphone</h2>
+    <ol>
+      <li>Click the <strong>Windows Start button</strong>, then open <strong>Settings</strong>.</li>
+      <li>Go to <strong>Privacy &amp; Security</strong> → <strong>Microphone</strong>.</li>
+      <li>Make sure <strong>"Microphone access"</strong> is turned <strong>ON</strong>.</li>
+      <li>Also turn on <strong>"Let desktop apps access your microphone"</strong>.</li>
+      <li>Come back here and click <strong>Start Recording</strong>. When Chrome asks permission, click <strong>Allow</strong>.</li>
+    </ol>
+    <button id="win-help-close" onclick="dismissHelp()">Got it — close this message</button>
+  </div>
+
+  <div id="main">
+
+    <!-- ── Editor ── -->
+    <div id="editor-panel">
+
+      <!-- Microphone -->
+      <div id="mic-section">
+        <button id="mic-btn" onclick="toggleRecording()" title="Click to start or stop recording your voice">
+          <span id="mic-icon">&#x1F3A4;</span>
+          <span id="mic-label">Start Recording</span>
+        </button>
+        <div id="status-msg" role="status" aria-live="polite">Ready — press the microphone button to begin.</div>
+      </div>
+
+      <!-- Editing indicator -->
+      <div id="editing-indicator">New note — not yet saved</div>
+
+      <!-- Title -->
+      <div class="section-gap">
+        <label for="note-title">Title (optional — leave blank to use today's date and time)</label>
+        <input type="text" id="note-title" placeholder="Enter a title for this note"
+               oninput="scheduleDraft()" />
+      </div>
+
+      <!-- Transcription area -->
+      <div class="section-gap" style="flex:1;display:flex;flex-direction:column;">
+        <label for="transcription">Transcribed Text</label>
+        <div id="print-title"></div>
+        <textarea id="transcription"
+                  placeholder="Your spoken words will appear here as you speak. You can also type or edit directly."
+                  oninput="scheduleDraft()"></textarea>
+      </div>
+
+      <!-- Action buttons -->
+      <div class="btn-row">
+        <button class="btn-save" onclick="saveNote()">Save Note</button>
+        <button class="btn-new"  onclick="newNote()">New Note</button>
+        <button                  onclick="copyText()">Copy Text</button>
+        <button                  onclick="printNote()">Print Note</button>
+      </div>
+      <div id="action-feedback" aria-live="polite"></div>
+
+      <!-- Text size -->
+      <div id="font-controls">
+        <span>Text Size:</span>
+        <button class="fs-btn" id="fs-normal"  onclick="setFontSize('normal')">Normal</button>
+        <button class="fs-btn" id="fs-large"   onclick="setFontSize('large')">Large</button>
+        <button class="fs-btn" id="fs-xlarge"  onclick="setFontSize('xlarge')">Extra Large</button>
+      </div>
+
+    </div>
+
+    <!-- ── Archive ── -->
+    <div id="archive-panel">
+      <div id="archive-header">
+        <h2>Saved Notes</h2>
+        <input type="text" id="search-box"
+               placeholder="Search notes by title or words..."
+               oninput="renderNotes()"
+               aria-label="Search saved notes" />
+      </div>
+
+      <div id="notes-list" role="list" aria-label="Saved notes"></div>
+
+      <div id="archive-footer">
+        <button class="btn-full" onclick="exportAll()">Export All Notes as Text File</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+'use strict';
+
+// ═══════════════════════════════════════════════════════
+//  State
+// ═══════════════════════════════════════════════════════
+var recognition   = null;
+var isRecording   = false;
+var interimText   = '';
+var currentNoteId = null;   // null = unsaved new note
+var draftTimer    = null;
+
+// ═══════════════════════════════════════════════════════
+//  Speech Recognition
+// ═══════════════════════════════════════════════════════
+function buildRecognition() {
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) return null;
+
+  var r = new SR();
+  r.continuous     = true;
+  r.interimResults = true;
+  r.lang           = 'en-US';
+
+  r.onresult = function(event) {
+    var finalChunk = '';
+    interimText = '';
+    for (var i = event.resultIndex; i < event.results.length; i++) {
+      var t = event.results[i][0].transcript;
+      if (event.results[i].isFinal) { finalChunk += t; }
+      else { interimText += t; }
+    }
+    if (finalChunk) {
+      var ta = document.getElementById('transcription');
+      if (ta.value && !/\s$/.test(ta.value)) ta.value += ' ';
+      ta.value += finalChunk;
+      scheduleDraft();
+    }
+    setStatus(interimText ? 'Hearing: \u201c' + interimText + '\u201d\u2026' : 'Recording\u2026 speak now.', 'live');
+  };
+
+  r.onerror = function(event) {
+    var msgs = {
+      'no-speech':     'No speech detected \u2014 still listening\u2026',
+      'audio-capture': 'Microphone not found. Check that it is plugged in and that Windows Privacy Settings allow microphone access (see setup steps above).',
+      'not-allowed':   'Microphone access was blocked. Please follow the setup steps at the top of this page to allow access in Windows and Chrome.',
+      'network':       'Could not reach speech servers \u2014 please check your internet connection and try again.'
+    };
+    var msg = msgs[event.error] || ('Error: ' + event.error);
+    setStatus(msg, event.error === 'no-speech' ? 'live' : 'err');
+    if (event.error !== 'no-speech') stopRecording();
+  };
+
+  r.onend = function() {
+    // Chrome stops silently after ~60 s of silence — restart automatically
+    if (isRecording) {
+      try { r.start(); } catch(e) { stopRecording(); }
+    }
+  };
+
+  return r;
+}
+
+function toggleRecording() {
+  if (isRecording) { stopRecording(); } else { startRecording(); }
+}
+
+function startRecording() {
+  if (!recognition) recognition = buildRecognition();
+  if (!recognition) {
+    setStatus('Web Speech is not supported. Please use Google Chrome on Windows.', 'err');
+    return;
+  }
+  try {
+    recognition.start();
+    isRecording = true;
+    interimText = '';
+    updateMicButton();
+    setStatus('Recording\u2026 speak now.', 'live');
+  } catch(e) {
+    setStatus('Could not start microphone: ' + e.message, 'err');
+  }
+}
+
+function stopRecording() {
+  isRecording = false;
+  interimText = '';
+  if (recognition) { try { recognition.stop(); } catch(e) {} }
+  updateMicButton();
+  setStatus('Recording stopped.', '');
+}
+
+function updateMicButton() {
+  var btn   = document.getElementById('mic-btn');
+  var label = document.getElementById('mic-label');
+  if (isRecording) {
+    btn.classList.add('recording');
+    label.textContent = 'Stop Recording';
+    btn.title = 'Click to stop recording';
+  } else {
+    btn.classList.remove('recording');
+    label.textContent = 'Start Recording';
+    btn.title = 'Click to start recording your voice';
+  }
+}
+
+function setStatus(msg, type) {
+  var el = document.getElementById('status-msg');
+  el.textContent = msg;
+  el.className = type || '';
+}
+
+// ═══════════════════════════════════════════════════════
+//  Auto-save draft  (survives accidental tab close)
+// ═══════════════════════════════════════════════════════
+function scheduleDraft() {
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(saveDraft, 8000);
+}
+
+function saveDraft() {
+  var ta = document.getElementById('transcription');
+  var ti = document.getElementById('note-title');
+  if (!ta.value && !ti.value) { clearDraft(); return; }
+  localStorage.setItem('speak_easy_draft', JSON.stringify({
+    title: ti.value, text: ta.value, noteId: currentNoteId
+  }));
+}
+
+function clearDraft() {
+  localStorage.removeItem('speak_easy_draft');
+}
+
+function restoreDraft() {
+  try {
+    var raw = localStorage.getItem('speak_easy_draft');
+    if (!raw) return;
+    var d = JSON.parse(raw);
+    if (!d.text && !d.title) return;
+    document.getElementById('transcription').value = d.text  || '';
+    document.getElementById('note-title').value    = d.title || '';
+    currentNoteId = d.noteId || null;
+    updateEditingIndicator();
+    renderNotes();
+    flash('Draft restored from your last session.', false);
+  } catch(e) { /* ignore */ }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Notes — localStorage
+// ═══════════════════════════════════════════════════════
+function loadNotes() {
+  try { return JSON.parse(localStorage.getItem('speak_easy_notes') || '[]'); } catch(e) { return []; }
+}
+function saveNotes(notes) {
+  localStorage.setItem('speak_easy_notes', JSON.stringify(notes));
+}
+function defaultTitle() {
+  return new Date().toLocaleString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', hour12: true
+  });
+}
+
+function saveNote() {
+  var ta   = document.getElementById('transcription');
+  var ti   = document.getElementById('note-title');
+  var text = ta.value.trim();
+  if (!text) { alert('Nothing to save \u2014 please speak or type something first.'); return; }
+
+  var title  = ti.value.trim() || defaultTitle();
+  var notes  = loadNotes();
+
+  if (currentNoteId !== null) {
+    var idx = notes.findIndex(function(n) { return n.id === currentNoteId; });
+    if (idx !== -1) {
+      notes[idx].title   = title;
+      notes[idx].text    = text;
+      notes[idx].updated = Date.now();
+    }
+  } else {
+    var note = { id: Date.now(), title: title, text: text, created: Date.now(), updated: Date.now() };
+    notes.unshift(note);
+    currentNoteId = note.id;
+  }
+
+  saveNotes(notes);
+  clearDraft();
+  ti.value = title;
+  updateEditingIndicator();
+  renderNotes();
+  flash('Note saved!', false);
+}
+
+function openNote(id) {
+  var note = loadNotes().find(function(n) { return n.id === id; });
+  if (!note) return;
+  if (isRecording) stopRecording();
+  document.getElementById('note-title').value    = note.title;
+  document.getElementById('transcription').value = note.text;
+  currentNoteId = id;
+  updateEditingIndicator();
+  renderNotes();
+  document.getElementById('transcription').focus();
+}
+
+function deleteNote(id) {
+  var note = loadNotes().find(function(n) { return n.id === id; });
+  if (!note) return;
+  if (!confirm('Delete the note \u201c' + note.title + '\u201d?\n\nThis cannot be undone.')) return;
+  var updated = loadNotes().filter(function(n) { return n.id !== id; });
+  saveNotes(updated);
+  if (currentNoteId === id) {
+    currentNoteId = null;
+    document.getElementById('transcription').value = '';
+    document.getElementById('note-title').value    = '';
+    updateEditingIndicator();
+  }
+  renderNotes();
+  flash('Note deleted.', false);
+}
+
+function newNote() {
+  var ta = document.getElementById('transcription');
+  var ti = document.getElementById('note-title');
+  if ((ta.value.trim() || ti.value.trim()) &&
+      !confirm('Start a new note?\n\nUnsaved changes will be lost.')) return;
+  if (isRecording) stopRecording();
+  ta.value = '';
+  ti.value = '';
+  currentNoteId = null;
+  clearDraft();
+  updateEditingIndicator();
+  renderNotes();
+  setStatus('Ready \u2014 press the microphone button to begin.', '');
+  flash('', false);
+}
+
+function updateEditingIndicator() {
+  var el = document.getElementById('editing-indicator');
+  if (currentNoteId !== null) {
+    var note = loadNotes().find(function(n) { return n.id === currentNoteId; });
+    el.textContent = note ? 'Editing saved note: \u201c' + note.title + '\u201d' : 'New note \u2014 not yet saved';
+  } else {
+    el.textContent = 'New note \u2014 not yet saved';
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Copy & Print
+// ═══════════════════════════════════════════════════════
+function copyText() {
+  var ta = document.getElementById('transcription');
+  if (!ta.value) { flash('Nothing to copy.', false); return; }
+  navigator.clipboard.writeText(ta.value).then(function() {
+    flash('Copied to clipboard!', false);
+  }).catch(function() {
+    ta.select();
+    document.execCommand('copy');
+    flash('Copied to clipboard!', false);
+  });
+}
+
+function printNote() {
+  var ta = document.getElementById('transcription');
+  if (!ta.value.trim()) { alert('Nothing to print yet.'); return; }
+  var titleEl = document.getElementById('print-title');
+  var ti = document.getElementById('note-title').value.trim() || defaultTitle();
+  titleEl.textContent = ti;
+  window.print();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Export
+// ═══════════════════════════════════════════════════════
+function exportAll() {
+  var notes = loadNotes();
+  if (!notes.length) { alert('No saved notes to export.'); return; }
+  var lines = [];
+  notes.forEach(function(note, i) {
+    var d = new Date(note.created).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true
+    });
+    lines.push('\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550');
+    lines.push('Note ' + (i + 1) + ': ' + note.title);
+    lines.push('Saved: ' + d);
+    lines.push('\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550');
+    lines.push(note.text);
+    lines.push('');
+  });
+  var blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+  var url  = URL.createObjectURL(blob);
+  var a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'speak-easy-notes-' + new Date().toISOString().slice(0, 10) + '.txt';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Render notes list
+// ═══════════════════════════════════════════════════════
+function renderNotes() {
+  var query    = document.getElementById('search-box').value.toLowerCase().trim();
+  var notes    = loadNotes();
+  var list     = document.getElementById('notes-list');
+
+  var filtered = notes.filter(function(n) {
+    if (!query) return true;
+    return n.title.toLowerCase().includes(query) || n.text.toLowerCase().includes(query);
+  });
+
+  if (!filtered.length) {
+    list.innerHTML = '<p style="padding:14px;color:#555;font-size:16px;">' +
+      (query ? 'No notes match your search.' : 'No saved notes yet. Record something and press Save Note!') + '</p>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(function(note) {
+    var active  = note.id === currentNoteId;
+    var d = new Date(note.updated || note.created).toLocaleString('en-US', {
+      month: 'short', day: 'numeric', year: 'numeric',
+      hour: 'numeric', minute: '2-digit', hour12: true
+    });
+    var preview = note.text.replace(/\n/g, ' ').slice(0, 80);
+    return (
+      '<div class="note-item' + (active ? ' active-note' : '') + '" role="listitem">' +
+        '<div class="note-item-top" tabindex="0"' +
+             ' onclick="openNote(' + note.id + ')"' +
+             ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();openNote(' + note.id + ')}"' +
+             ' title="Click to open this note">' +
+          '<div class="note-text-block">' +
+            '<div class="note-title">'   + escHtml(note.title)   + '</div>' +
+            '<div class="note-preview">' + escHtml(preview) + (preview.length === 80 ? '\u2026' : '') + '</div>' +
+            '<div class="note-date">Last saved: ' + d + '</div>' +
+          '</div>' +
+          '<button class="btn-del" onclick="event.stopPropagation();deleteNote(' + note.id + ')"' +
+                  ' title="Delete this note">Delete</button>' +
+        '</div>' +
+      '</div>'
+    );
+  }).join('');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ═══════════════════════════════════════════════════════
+//  Font size
+// ═══════════════════════════════════════════════════════
+function setFontSize(size) {
+  var html = document.documentElement;
+  html.classList.remove('fs-large', 'fs-xlarge');
+  if (size === 'large')  html.classList.add('fs-large');
+  if (size === 'xlarge') html.classList.add('fs-xlarge');
+  localStorage.setItem('speak_easy_fontsize', size);
+  document.querySelectorAll('.fs-btn').forEach(function(b) { b.classList.remove('active'); });
+  document.getElementById('fs-' + size).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════════════
+//  Windows help banner
+// ═══════════════════════════════════════════════════════
+function dismissHelp() {
+  document.getElementById('win-help').style.display = 'none';
+  localStorage.setItem('speak_easy_help_dismissed', '1');
+}
+
+// ═══════════════════════════════════════════════════════
+//  Feedback flash
+// ═══════════════════════════════════════════════════════
+function flash(msg, isErr) {
+  var el = document.getElementById('action-feedback');
+  el.textContent = msg;
+  el.style.color = isErr ? '#8a1a1a' : '#1a5c1a';
+  clearTimeout(el._t);
+  if (msg) el._t = setTimeout(function() { el.textContent = ''; }, 3500);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Init
+// ═══════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+
+  // Font size
+  var savedSize = localStorage.getItem('speak_easy_fontsize') || 'normal';
+  setFontSize(savedSize);
+
+  // Help banner
+  if (localStorage.getItem('speak_easy_help_dismissed')) {
+    document.getElementById('win-help').style.display = 'none';
+  }
+
+  // Chrome check
+  var isChrome = /Chrome\//.test(navigator.userAgent) && !/Edg\/|OPR\//.test(navigator.userAgent);
+  var notice = document.getElementById('chrome-notice');
+  if (!isChrome) {
+    notice.style.background = '#c0392b';
+    notice.style.color      = '#ffffff';
+    notice.textContent      = 'Chrome required \u2014 recording will not work in this browser';
+  }
+
+  // Notes & draft
+  renderNotes();
+  restoreDraft();
+  updateEditingIndicator();
+
+  // Warn before closing with unsaved text
+  window.addEventListener('beforeunload', function(e) {
+    var ta = document.getElementById('transcription');
+    if (ta.value.trim()) {
+      saveDraft(); // make sure it's saved
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
+});
+</script>
+</body>
+</html>
